@@ -101,7 +101,9 @@ class CommandProcessor:
                 # 暂停当前任务
                 state.interrupt_active_task()
                 # 恢复目标任务
-                state.resume_task(target_flow.id)
+                if not state.resume_task(target_flow.id):
+                    state.resume_task()  # 回退：恢复刚才中断的任务
+                    return
                 # 启动system_task_interrupted
                 state.start_system_task(InterruptedSystemContext(
                     flow_id="system_task_interrupted",
@@ -113,7 +115,8 @@ class CommandProcessor:
                 ))
         else:
             # 恢复目标任务
-            state.resume_task(target_flow.id)
+            if not state.resume_task(target_flow.id):
+                return
             # 启动system_task_resumed
             state.start_system_task(
                 ResumedSystemContext(

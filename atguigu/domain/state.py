@@ -162,12 +162,18 @@ class DialogueState:
         self.active_task = None
         self.active_system_task = None
 
-    def resume_task(self, flow_id: str):
-        for task in self.paused_tasks:
+    def resume_task(self, flow_id: str | None = None) -> bool:
+        if not self.paused_tasks:
+            return False
+        if flow_id is None:
+            self.active_task = self.paused_tasks.pop()
+            return True
+        for i, task in enumerate(self.paused_tasks):
             if task.flow_id == flow_id:
                 self.active_task = task
-                self.paused_tasks.remove(task)
-                break
+                del self.paused_tasks[i]
+                return True
+        return False
 
     def current_session(self) -> Session | None:
         for session in self.sessions:
