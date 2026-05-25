@@ -49,6 +49,9 @@ class ClarifyReason(str, Enum):
     MISSING_KNOWLEDGE_INTENT = "missing_knowledge_intent"
     MISSING_FOCUSED_OBJECT = "missing_focused_object"
     OBJECT_REQUIRES_INTENT = "object_requires_intent"
+    INVALID_TASK_COMMANDS = "invalid_task_commands"
+    MULTIPLE_TASK_FLOWS = "multiple_task_flows"
+    UNKNOWN_TASK_FLOW = "unknown_task_flow"
 
 
 @dataclass

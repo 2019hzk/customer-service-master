@@ -2,7 +2,6 @@ import time
 
 from atguigu.chitchat.handler import ChitchatHandler
 from atguigu.clarify.responder import ClarifyResponder
-from atguigu.domain.contexts import CollectSystemContext
 from atguigu.domain.messages import UserMessage, ProcessResult, MessageType, BotMessage
 from atguigu.domain.state import DialogueState, FocusedObject
 from atguigu.knowledge.handler import KnowledgeHandler
@@ -84,6 +83,7 @@ class DialogueEngine:
         )
         validation = self.turn_plan_validator.validate(
             turn_plan, state=state, knowledge_intents=self.knowledge_handler.knowledge_intents,
+            flows=self.task_handler.flows,
         )
         if not validation.valid:
             return await self.clarify_responder.respond(
@@ -97,15 +97,11 @@ class DialogueEngine:
                 state=state,
             )
         elif turn_plan.knowledge is not None:
-            if state.active_task:
-                state.interrupt_active_task()
             return await self.knowledge_handler.handle(
                 state=state,
                 intents=turn_plan.knowledge.intents,
             )
 
-        if state.active_task:
-            state.interrupt_active_task()
         return await self.chitchat_handler.handle(state=state)
 
     async def _handle_object_message(
@@ -113,55 +109,69 @@ class DialogueEngine:
             message: UserMessage,
             state: DialogueState,
     ) -> list[BotMessage]:
-        command = self._object_slot_command(
+        commands = self._resolve_object_commands(
             message=message,
             state=state,
             flows=self.task_handler.flows,
         )
-        if command is None:
-            return await self.clarify_responder.respond(
-                state=state,
-                reason=ClarifyReason.OBJECT_REQUIRES_INTENT,
-            )
+        if commands:
+            return await self.task_handler.handle(commands=commands, state=state)
 
-        return await self.task_handler.handle(commands=[command], state=state)
+        # 没有匹配到 slot。如果用户正在一个流程中，不打断，让流程继续。
+        if state.active_task is not None:
+            return await self.task_handler.handle(commands=[], state=state)
 
-    def _object_slot_command(
+        return await self.clarify_responder.respond(
+            state=state,
+            reason=ClarifyReason.OBJECT_REQUIRES_INTENT,
+        )
+
+    def _resolve_object_commands(
             self,
             message: UserMessage,
             state: DialogueState,
             flows: FlowsList,
-    ) -> Command | None:
+    ) -> list[Command]:
         message_object = message.object
+        if message_object is None:
+            return []
+
         object_type = message_object.type.strip().lower()
-        collect_slot_name = self._current_collect_slot_name(state=state, flows=flows)
 
-        if object_type == "order" and collect_slot_name == "order_number":
-            return SetSlotsCommand(
-                command="set_slots",
-                slots={"order_number": message_object.id},
-            )
-        if object_type == "product" and collect_slot_name == "product_id":
-            return SetSlotsCommand(
-                command="set_slots",
-                slots={"product_id": message_object.id},
-            )
+        if object_type == "order":
+            if self._flow_has_unfilled_collect_slot(state, flows, "order_number"):
+                return [SetSlotsCommand(
+                    command="set_slots",
+                    slots={"order_number": message_object.id},
+                )]
+            return []
 
-        return None
+        if object_type == "product":
+            if self._flow_has_unfilled_collect_slot(state, flows, "product_id"):
+                return [SetSlotsCommand(
+                    command="set_slots",
+                    slots={"product_id": message_object.id},
+                )]
+            return []
+
+        return []
 
     @staticmethod
-    def _current_collect_slot_name(
+    def _flow_has_unfilled_collect_slot(
             state: DialogueState,
             flows: FlowsList,
-    ) -> str | None:
-        if isinstance(state.active_system_task, CollectSystemContext):
-            return state.active_system_task.slot_name or None
-
+            slot_name: str,
+    ) -> bool:
+        """检查当前流程是否定义了名为 slot_name 的收集槽且尚未填充。"""
         active_task = state.active_task
         if active_task is None:
-            return None
-        current_flow = flows.get_flow_by_id(active_task.flow_id)
-        current_step = current_flow.get_step_by_id(active_task.step_id)
-        if not isinstance(current_step, CollectSlotStep):
-            return None
-        return current_step.slot_name
+            return False
+        flow = flows.get_flow_by_id(active_task.flow_id)
+        if flow is None:
+            return False
+        if active_task.slots.get(slot_name):
+            return False
+        for step in flow.steps:
+            if isinstance(step, CollectSlotStep) and step.slot_name == slot_name:
+                return True
+        return False
