@@ -78,8 +78,9 @@ class FlowExecutor:
                         return ActionCall(action_name="action_response",
                                           action_kwargs=asdict(step.validation.failure_response))
                     else:
-                        # 无响应
-                        return None
+                        # 校验失败, 没有定义 failure_response 时也应给用户反馈，而非静默重问
+                        return ActionCall(action_name="action_response",
+                                          action_kwargs={"text": "你提供的信息有误，请重新输入。"})
             else:
                 # 无需校验
                 self._advance_to_next_step(step, state)
